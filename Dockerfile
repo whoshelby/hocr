@@ -1,25 +1,35 @@
+FROM golang:1.21 AS build
 
-FROM golang:1.21.1
+WORKDIR /app
 
-LABEL maintainer="deadaf <dead@heyo.ooo>"
+# Copy go mod and download deps
+COPY go.mod go.sum ./
+RUN go mod download
 
-RUN apt-get update -qq
-
-
-RUN apt-get install -y -qq libtesseract-dev libleptonica-dev
-
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
-
-RUN apt-get install -y -qq \
-    tesseract-ocr-eng 
-
-WORKDIR ${GOPATH}/src/github.com/quotienbot/ocr
-
+# Copy source
 COPY . .
 
-RUN go get -v ./... && go install .
+# Build the Go binary
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o ocr-server main.go
+
+
+# Final slim container
+FROM debian:bookworm-slim
+
+# Install tesseract
+RUN apt-get update && \
+    apt-get install -y tesseract-ocr tesseract-ocr-eng && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary from build image
+COPY --from=build /app/ocr-server /app/ocr-server
+
+# Copy env file (optional)
+COPY .env /app/.env
 
 EXPOSE 8080
-CMD ["ocr"]
 
-
+# Run server
+CMD ["./ocr-server"]
