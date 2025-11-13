@@ -1,35 +1,48 @@
-FROM golang:1.21 AS build
+# -------------------------------
+# Build Stage
+# -------------------------------
+FROM golang:1.21 as build
 
-WORKDIR /app
-
-# Copy go mod and download deps
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy source
-COPY . .
-
-# Build the Go binary
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o ocr-server main.go
-
-
-# Final slim container
-FROM debian:bookworm-slim
-
-# Install tesseract
+# Install build dependencies for gosseract
 RUN apt-get update && \
-    apt-get install -y tesseract-ocr tesseract-ocr-eng && \
+    apt-get install -y \
+        libleptonica-dev \
+        libtesseract-dev \
+        tesseract-ocr \
+        tesseract-ocr-eng && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy binary from build image
-COPY --from=build /app/ocr-server /app/ocr-server
+# Copy go.mod first to cache modules
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Copy env file (optional)
+# Copy all source code
+COPY . .
+
+# Build the Go binary with CGO enabled
+RUN CGO_ENABLED=1 go build -o ocr-server main.go
+
+
+# -------------------------------
+# Runtime Stage (Slim)
+# -------------------------------
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y \
+        tesseract-ocr \
+        tesseract-ocr-eng && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy built binary
+COPY --from=build /app/ocr-server /app/ocr-server
 COPY .env /app/.env
 
 EXPOSE 8080
 
-# Run server
 CMD ["./ocr-server"]
